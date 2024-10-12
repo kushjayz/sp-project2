@@ -1,3 +1,8 @@
+// TS2002 Project 2 2024
+//  Student1:   24205163   Kushan Sanka Jayasekera
+//  Student2:   24297797   Gayathri Kasunthika Kanakaratne
+//  Platform:   Linux
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,8 +53,9 @@ struct memory* get_ref_virt_mem_loc(int process_id, int page_num, int *index_vir
 void update_last_acc_time();
 void write_to_file(char* filename);
 
-void print_memory (struct memory **location, int memory_size);
-void print_processes (struct process **processList);
+// Free allocated space
+void free_processes(struct process **processList);
+void free_memory(struct memory **location, int memory_size);
 
 
 // Array of pointers for phyiscal RAM, Virtual Memory and Processes
@@ -70,11 +76,35 @@ int main (int argc, char* argv[]) {
     FILE* r_file = fopen(argv[1], "r");
     if(r_file == NULL) {
         report_error("Error!: Unable to open the file!");
-        return EXIT_FAILURE;
+        exit(EXIT_FAILURE);
     }
     perform_stimulation(&r_file);
     fclose(r_file);
     write_to_file(argv[2]);
+    
+    // Free allocated memory
+    free_processes(processes);
+    free_memory(virtual_memory, SIZE_VIRTUAL_MEMORY);
+}
+
+// Frees the memory allocated for processes after execution
+void free_processes(struct process **processList) {
+    for (int i = 0; i < NUMBER_OF_PROCESSES; i++) {
+        if(processList[i] != NULL) {   // Check if pointer is not already freed
+            free(processList[i]);
+            processList[i] = NULL;     // Set to NULL after freeing
+        }
+    }
+}
+
+
+void free_memory(struct memory **location, int memory_size) {
+    for (int i = 0; i < memory_size; i++) {
+        if(location[i] != NULL) {
+            free(location[i]); // Free each allocated struct
+            location[i] = NULL; // Set pointer to NULL to avoid dangling pointer
+        }
+    }
 }
 
 // Function that performs the simulation
@@ -111,14 +141,14 @@ void load_proc_to_ram (int processID) {
     for(int i = 0; i < SIZE_PHYSICAL_MEMORY; i+=2) {
         if(highest_last_access < RAM[i]->last_accessed) {
             highest_last_access = RAM[i]->last_accessed; 
-            last_access_RAM_index = i; // Index of the RAM location to be replaced
+            last_access_RAM_index = i; // Index of the RAM location to be replaced incase the memory is full
         }
         // If any untilized memory location allocate the process
         if(RAM[i]->process_id == UNUTILIZED) {
             update_last_acc_time();
             process_to_load->page_table[page_num] = (i/2); // Updating reference in page table
             RAM[i] = virt_mem_reference; // loading reference to RAM
-            RAM[i+1] = virt_mem_reference++; // loading the contiguous reference to RAM
+            RAM[i+1] = virt_mem_reference + 1; // loading the contiguous reference to RAM
             return;
         }
     }
@@ -210,6 +240,10 @@ void load_processes_to_virtual_memory(struct memory **virtual_memory, struct pro
 // Function to write all the processes and RAM onto file
 void write_to_file(char* filename) {
     FILE* w_file = fopen(filename, "w");
+    if(w_file == NULL) {
+        report_error("Error!: Unable to open the file!");
+        exit(EXIT_FAILURE);
+    }
     // Writing all the processes with page numbers
     for(int i = 0; i < NUMBER_OF_PROCESSES; i++) {
         fprintf(w_file, "Process %d : ", processes[i]->process_id);
@@ -241,66 +275,37 @@ void init(struct memory **RAM, struct memory **virtual_memory, struct process **
 }
 
 // This function initalizes the processes by loading them to virtual memory
-void init_processes (struct process **processList) {
+void init_processes(struct process **processList) {
     for (int i = 0; i < NUMBER_OF_PROCESSES; i++) {
         processList[i] = malloc(sizeof(struct process));
-        if(processList[i] != NULL) {
-            processList[i]->process_id = i;
-            for (int y = 0; y < PROCESS_PAGE_SIZE; y++) {
-                processList[i]->page_table[y] = DISK_MODE; // Disk mode means loading to virtual memory
-            }
+        if (processList[i] == NULL) {
+            report_error("Memory allocation failed for processes.");
+            exit(EXIT_FAILURE);
+        }
+        processList[i]->process_id = i;
+        for (int y = 0; y < PROCESS_PAGE_SIZE; y++) {
+            processList[i]->page_table[y] = DISK_MODE; // Disk mode means loading to virtual memory
         }
     }
-    // print_processes(processList);
 }
+
 
 // This function initialises memory on start up
-void init_memory (struct memory **location, int memory_size) {
+void init_memory(struct memory **location, int memory_size) {
+    for (int i = 0; i < memory_size; i++) {
+        location[i] = NULL;
+    }
     for (int i = 0; i < memory_size; i++) {
         location[i] = malloc(sizeof(struct memory));
-        if(location[i] != NULL) {
-            location[i]->process_id = UNUTILIZED;
-            location[i]->page_num = UNUTILIZED;
-            location[i]->last_accessed = UNUTILIZED;
+        if (location[i] == NULL) {
+            report_error("Memory allocation failed for memory locations.");
+            exit(EXIT_FAILURE);
         }
-    }
-    // print_memory(location, memory_size);
-}
-
-void print_memory (struct memory **location, int memory_size) {
-    for (int i = 0; i < memory_size; i++) {
-        int id = location[i]->process_id;
-        int num = location[i]->page_num;
-        int l_access = location[i]->last_accessed;
-        printf("Location Index: %d -> process_id: %d, page_num: %d, last_accessed: %d\n", i, id, num, l_access);
+        location[i]->process_id = UNUTILIZED;
+        location[i]->page_num = UNUTILIZED;
+        location[i]->last_accessed = UNUTILIZED;
     }
 }
-
-// Frees the memory allocated for processes after execution
-void free_processes(struct process **processList) {
-    for (int i = 0; i < NUMBER_OF_PROCESSES; i++) {
-        free(processList[i]);
-    }
-}
-
-// Frees the memory allocated for both virtual and RAM after execution
-void free_memory(struct memory **location, int memory_size) {
-    for (int i = 0; i < memory_size; i++) {
-        free(location[i]);  // Free each memory frame
-    }
-}
-
-
-void print_processes (struct process **processList) {
-    for (int i = 0; i < NUMBER_OF_PROCESSES; i++) {
-        printf("Process: %d\n\tEntries\n\t", processList[i]->process_id);
-        for (int y = 0; y < PROCESS_PAGE_SIZE; y++) {
-            printf("%d ", processList[i]->page_table[y]);
-        }
-        printf("\n");
-    }
-}
-
 void report_error(const char *message) {
     fprintf(stderr, "! %s\n", message);
 }
