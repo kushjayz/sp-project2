@@ -3,6 +3,9 @@
 //  Student2:   24297797   Gayathri Kasunthika Kanakaratne
 //  Platform:   Linux
 
+// Based on this simulation, a page will be skipped if it already resides in memory
+// But still the timestep will execute
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,7 +18,7 @@
 #define NUMBER_OF_PROCESSES 4
 #define DISK_MODE 99
 #define UNUTILIZED -1
-#define ALL_PAGES_IN_DISK -1
+#define ALL_PAGES_IN_DISK -999
 
 
 // Structure to represent each frame in memory
@@ -132,6 +135,7 @@ void load_proc_to_ram (int processID) {
 
     int page_num = get_process(processID, &process_to_load);
     if(page_num == ALL_PAGES_IN_DISK) {
+        update_last_acc_time();
         return; // If all pages have already been in RAM then ignore.
     }
     struct memory *virt_mem_reference = get_ref_virt_mem_loc(processID, page_num, &index_virt_mem);
@@ -148,7 +152,7 @@ void load_proc_to_ram (int processID) {
             update_last_acc_time();
             process_to_load->page_table[page_num] = (i/2); // Updating reference in page table
             RAM[i] = virt_mem_reference; // loading reference to RAM
-            RAM[i+1] = virt_mem_reference + 1; // loading the contiguous reference to RAM
+            RAM[i+1] = virt_mem_reference++; // loading the contiguous reference to RAM
             return;
         }
     }
@@ -156,10 +160,15 @@ void load_proc_to_ram (int processID) {
     // This section will run only if the RAM is full.
     // If the RAM is full have to update the reference to the new memory location based on LRU Algorithmn
     if(last_access_RAM_index != -1) {
+        // Updating page_num in process page table of process moved to virtual memory
+        int rm_proc_id = RAM[last_access_RAM_index]->process_id;
+        int rm_proc_id_pg_num = RAM[last_access_RAM_index]->page_num;
+        processes[rm_proc_id]->page_table[rm_proc_id_pg_num] = 99; 
+
         int process_id = virt_mem_reference->process_id;
         int page = virt_mem_reference->page_num;
         update_last_acc_time();
-        process_to_load->page_table[page_num] = (last_access_RAM_index/2)+1; // Updating page table 
+        process_to_load->page_table[page_num] = (last_access_RAM_index/2); // Updating page table 
         RAM[last_access_RAM_index]= virt_mem_reference;
         RAM[last_access_RAM_index+1] = virt_mem_reference++;
         return;
