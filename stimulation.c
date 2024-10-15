@@ -19,6 +19,8 @@
 #define DISK_MODE 99
 #define UNUTILIZED -1
 #define ALL_PAGES_IN_DISK -999
+#define PROCESS_PAGE_NOT_FOUND -999
+#define MAX_TIMESTEP  2147483647
 
 
 // Structure to represent each frame in memory
@@ -52,9 +54,11 @@ int get_stimulation_PID(int *array, char *line);
 void load_proc_to_ram (int processID);
 void alloc_proc_page_to_ram (int process_id, int page_num);
 int get_process(int processID, struct process **process_to_load);
-struct memory* get_ref_virt_mem_loc(int process_id, int page_num, int *index_virt_mem);
-void update_last_acc_time();
+int get_index_virt_mem_loc(int process_id, int page_num);
 void write_to_file(char* filename);
+
+void print_memory (struct memory **location, int memory_size);
+void print_processes (struct process **processList);
 
 // Free allocated space
 void free_processes(struct process **processList);
@@ -65,6 +69,7 @@ void free_memory(struct memory **location, int memory_size);
 struct memory* RAM[SIZE_PHYSICAL_MEMORY];
 struct memory* virtual_memory[SIZE_VIRTUAL_MEMORY];
 struct process* processes[NUMBER_OF_PROCESSES];
+int timestep = 0; // initially timestep is 0
 
 int main (int argc, char* argv[]) {
     if(argc != 3) {
@@ -84,6 +89,10 @@ int main (int argc, char* argv[]) {
     perform_stimulation(&r_file);
     fclose(r_file);
     write_to_file(argv[2]);
+
+    // print_memory (RAM, SIZE_PHYSICAL_MEMORY);
+    // print_processes (processes);
+
     
     // Free allocated memory
     free_processes(processes);
@@ -121,38 +130,43 @@ void perform_stimulation(FILE **r_file) {
         for(int i = 0; i < no_of_proc; i++) {
             // Loading each page frame on to RAM
             load_proc_to_ram(array[i]);
+            timestep++;
         }
     }
 }
 
 // This function loads a specific process into RAM
 void load_proc_to_ram (int processID) {
-    int highest_last_access = -1; // Used to 
+    int lowest_last_access = MAX_TIMESTEP; // Used to get th lowest last access for LRU alg
     int last_access_RAM_index = -1;
-    int index_virt_mem; // This index can be used if needed to replace currently allocated RAM process onto Virtual Memory
-    // Since not required skipping step.
     struct process *process_to_load;
 
     int page_num = get_process(processID, &process_to_load);
     if(page_num == ALL_PAGES_IN_DISK) {
-        update_last_acc_time();
         return; // If all pages have already been in RAM then ignore.
     }
-    struct memory *virt_mem_reference = get_ref_virt_mem_loc(processID, page_num, &index_virt_mem);
-    int id = virt_mem_reference->process_id;
-    int num = virt_mem_reference->page_num;
-    int l_access = virt_mem_reference->last_accessed;
+
+    int index_virt_mem = get_index_virt_mem_loc(processID, page_num);
+
+    if(index_virt_mem == PROCESS_PAGE_NOT_FOUND) {
+        report_error("Error: invalid page");
+        return;
+    }
+    struct memory *first_arr_ref = virtual_memory[index_virt_mem]; // First location
+    struct memory *second_arr_ref = virtual_memory[index_virt_mem+1]; // Contiguos location
+    first_arr_ref->last_accessed = timestep;
+    second_arr_ref->last_accessed = timestep;
+
     for(int i = 0; i < SIZE_PHYSICAL_MEMORY; i+=2) {
-        if(highest_last_access < RAM[i]->last_accessed) {
-            highest_last_access = RAM[i]->last_accessed; 
+        if(lowest_last_access > RAM[i]->last_accessed) {
+            lowest_last_access = RAM[i]->last_accessed; 
             last_access_RAM_index = i; // Index of the RAM location to be replaced incase the memory is full
         }
         // If any untilized memory location allocate the process
         if(RAM[i]->process_id == UNUTILIZED) {
-            update_last_acc_time();
             process_to_load->page_table[page_num] = (i/2); // Updating reference in page table
-            RAM[i] = virt_mem_reference; // loading reference to RAM
-            RAM[i+1] = virt_mem_reference++; // loading the contiguous reference to RAM
+            RAM[i] = first_arr_ref; // loading reference to RAM
+            RAM[i+1] = second_arr_ref; // loading the contiguous reference to RAM
             return;
         }
     }
@@ -164,24 +178,30 @@ void load_proc_to_ram (int processID) {
         int rm_proc_id = RAM[last_access_RAM_index]->process_id;
         int rm_proc_id_pg_num = RAM[last_access_RAM_index]->page_num;
         processes[rm_proc_id]->page_table[rm_proc_id_pg_num] = 99; 
-
-        int process_id = virt_mem_reference->process_id;
-        int page = virt_mem_reference->page_num;
-        update_last_acc_time();
         process_to_load->page_table[page_num] = (last_access_RAM_index/2); // Updating page table 
-        RAM[last_access_RAM_index]= virt_mem_reference;
-        RAM[last_access_RAM_index+1] = virt_mem_reference++;
+        RAM[last_access_RAM_index] = first_arr_ref; // loading reference to RAM
+        RAM[last_access_RAM_index+1] = second_arr_ref; // loading the contiguous reference to RAM
         return;
     }
 }
 
-// Function to update the last access time of each process, each time a new process is to be allocated
-void update_last_acc_time() {
-    for(int i = 0; i < SIZE_PHYSICAL_MEMORY; i+=2) {
-        int last_access = RAM[i]->last_accessed;
-        if(last_access != UNUTILIZED) {
-            RAM[i]->last_accessed = ++last_access;
+void print_memory (struct memory **location, int memory_size) {
+    for (int i = 0; i < memory_size; i++) {
+        int id = location[i]->process_id;
+        int num = location[i]->page_num;
+        int l_access = location[i]->last_accessed;
+        printf("Page No: %d -> process_id: %d, page_num: %d, last_accessed: %d\n", i, id, num, l_access);
+    }
+}
+
+
+void print_processes (struct process **processList) {
+    for (int i = 0; i < NUMBER_OF_PROCESSES; i++) {
+        printf("Process: %d\n\tEntries\n\t", processList[i]->process_id);
+        for (int y = 0; y < PROCESS_PAGE_SIZE; y++) {
+            printf("%d ", processList[i]->page_table[y]);
         }
+        printf("\n");
     }
 }
 
@@ -200,17 +220,14 @@ int get_process(int processID, struct process **process_to_load) {
     }
 }
 
-// This function retrieves the page's reference from virtual memory
-struct memory* get_ref_virt_mem_loc(int process_id, int page_num, int *index_virt_mem) {
+// This function retrieves the index location of the page in virtual memory
+int get_index_virt_mem_loc(int process_id, int page_num) {
         for (int i = 0; i < SIZE_VIRTUAL_MEMORY; i+=2) {
             if(virtual_memory[i]->process_id == process_id && virtual_memory[i]->page_num == page_num) {
-                // Returning location in virtual memory 
-                *index_virt_mem = i;
-                return virtual_memory[i];
+                return i;
             }
         }
-
-        return NULL;
+        return PROCESS_PAGE_NOT_FOUND;
 }
 
 // This function accepts a line, with a pointer to an array.
