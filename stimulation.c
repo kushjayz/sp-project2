@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <ctype.h>
 
 #define SIZE_PHYSICAL_MEMORY 16
@@ -40,7 +41,9 @@ struct process{
     int process_id;
     // Has 4 pages. The array index key represents the page number (0 - 3)
     // Value represents the position in physical / virtual memory
+    bool is_already_loaded[PROCESS_PAGE_SIZE];
     int page_table[PROCESS_PAGE_SIZE];
+    bool is_proc_in_mem; // Used to check if to use local or global LRU 
 };
 
 
@@ -158,13 +161,26 @@ void load_proc_to_ram (int processID) {
     second_arr_ref->last_accessed = timestep;
 
     for(int i = 0; i < SIZE_PHYSICAL_MEMORY; i+=2) {
-        if(lowest_last_access > RAM[i]->last_accessed) {
-            lowest_last_access = RAM[i]->last_accessed; 
-            last_access_RAM_index = i; // Index of the RAM location to be replaced incase the memory is full
+        if(process_to_load->is_proc_in_mem) {
+            // If process is already loaded need to check for local LRU
+            if(RAM[i]->process_id == processID) {
+                if(lowest_last_access > RAM[i]->last_accessed) {
+                    lowest_last_access = RAM[i]->last_accessed; 
+                    last_access_RAM_index = i; // Index of the RAM location to be replaced incase the memory is full
+                }
+            }
+        } else {
+            // Global LRU
+            if(lowest_last_access > RAM[i]->last_accessed) {
+                lowest_last_access = RAM[i]->last_accessed; 
+                last_access_RAM_index = i; // Index of the RAM location to be replaced incase the memory is full
+            }
         }
         // If any untilized memory location allocate the process
         if(RAM[i]->process_id == UNUTILIZED) {
             process_to_load->page_table[page_num] = (i/2); // Updating reference in page table
+            process_to_load->is_already_loaded[page_num] = true;
+            process_to_load->is_proc_in_mem = true; // Set that process is already in memory
             RAM[i] = first_arr_ref; // loading reference to RAM
             RAM[i+1] = second_arr_ref; // loading the contiguous reference to RAM
             return;
@@ -177,8 +193,10 @@ void load_proc_to_ram (int processID) {
         // Updating page_num in process page table of process moved to virtual memory
         int rm_proc_id = RAM[last_access_RAM_index]->process_id;
         int rm_proc_id_pg_num = RAM[last_access_RAM_index]->page_num;
-        processes[rm_proc_id]->page_table[rm_proc_id_pg_num] = 99; 
+        processes[rm_proc_id]->page_table[rm_proc_id_pg_num] = DISK_MODE; 
         process_to_load->page_table[page_num] = (last_access_RAM_index/2); // Updating page table 
+        process_to_load->is_already_loaded[page_num] = true;
+        process_to_load->is_proc_in_mem = true;
         RAM[last_access_RAM_index] = first_arr_ref; // loading reference to RAM
         RAM[last_access_RAM_index+1] = second_arr_ref; // loading the contiguous reference to RAM
         return;
@@ -210,7 +228,7 @@ int get_process(int processID, struct process **process_to_load) {
     for(int i = 0; i < NUMBER_OF_PROCESSES; i++) {
         if(processes[i]->process_id == processID) {
             for (int y = 0; y < PROCESS_PAGE_SIZE; y++) {
-                if(processes[i]->page_table[y] == 99) {
+                if(processes[i]->page_table[y] == DISK_MODE && processes[i]->is_already_loaded[y] == false) {
                     *process_to_load = processes[i];
                     return y;
                 }
@@ -283,7 +301,7 @@ void write_to_file(char* filename) {
         int process_page_no = RAM[i]->page_num;
         int process_no = RAM[i]->process_id;
         int timestep = RAM[i]->last_accessed;
-        fprintf(w_file, "%d,%d,%d; ", process_page_no, process_no, timestep);
+        fprintf(w_file, "%d,%d,%d; ", process_no, process_page_no, timestep);
     }
 
     fclose(w_file);
@@ -311,6 +329,8 @@ void init_processes(struct process **processList) {
         processList[i]->process_id = i;
         for (int y = 0; y < PROCESS_PAGE_SIZE; y++) {
             processList[i]->page_table[y] = DISK_MODE; // Disk mode means loading to virtual memory
+            processList[i]->is_already_loaded[y] = false;
+            processList[i]->is_proc_in_mem = false;
         }
     }
 }
